@@ -16,6 +16,13 @@ console.clear();
 const args = process.argv.slice(2);
 const useFreeModels = args.includes('--free');
 
+let resumeSessionPath: undefined | string;
+const resumeIndex = args.indexOf('--resume');
+if (resumeIndex !== -1 && args.length > resumeIndex + 1) {
+  resumeSessionPath = args[resumeIndex + 1];
+  console.log(`🔄 RESUME mode: resuming session from ${resumeSessionPath}\n`);
+}
+
 if (useFreeModels) {
   console.log('💰 FREE mode: using free models\n');
 }
@@ -35,6 +42,7 @@ if (!process.env.OPENROUTER_API_KEY) {
 const { waitUntilExit } = render(
   <App
     useFreeModels={useFreeModels}
+    resumeSessionPath={resumeSessionPath}
     onExit={() => {
       process.exit(0);
     }}

@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "node"
+  },
+  "include": ["src/bot/**/*", "src/api/**/*", "src/utils/**/*", "src/workflows/**/*", "src/types/**/*"],
+  "exclude": ["node_modules", "dist", "src/components", "src/i18n", "src/index.tsx"]
+}

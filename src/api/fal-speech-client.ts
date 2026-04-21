@@ -14,11 +14,12 @@ export type SpeechToTextInput = {
 
 export interface SpeechToTextOutput {
   text?: string;
-  // Whisper format
+  // Whisper format (may have start/end OR timestamp:[start,end])
   chunks?: Array<{
     text?: string;
     start?: number;
     end?: number;
+    timestamp?: [number, number];
     speaker?: string;
   }>;
   // ElevenLabs format
@@ -143,12 +144,12 @@ export class SpeechToTextClient extends FalBaseClient {
         end: word.end,
       })));
     }
-    // Extract from chunks array (Whisper format)
+    // Extract from chunks array (Whisper format — may use timestamp:[start,end] or start/end)
     else if (Array.isArray(result.chunks)) {
       aggregated.push(...result.chunks.map(chunk => ({
         text: chunk.text,
-        start: chunk.start,
-        end: chunk.end,
+        start: chunk.start ?? chunk.timestamp?.[0],
+        end: chunk.end ?? chunk.timestamp?.[1],
       })));
     }
 

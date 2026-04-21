@@ -1,4 +1,11 @@
 import OpenAI from 'openai';
+import { ReferenceImage } from '../types/video-step';
+
+export interface PromptMapping {
+  prompt: string;
+  referenceImageIndex?: number | null;
+  referenceAction?: 'direct_use' | 'img2img' | null;
+}
 
 export interface TextGenerationResult {
   text: string;
@@ -101,7 +108,8 @@ Return only the clean story text, without additional explanations or markup.`;
     return variants;
   }
 
-  async generateVideoPrompts(storyText: string, duration: number = 60): Promise<string[]> {
+
+  async generateVideoPrompts(storyText: string, duration: number = 60, referenceImages: ReferenceImage[] = []): Promise<PromptMapping[]> {
     const startTime = Date.now();
 
     console.log('\n' + '='.repeat(60));
@@ -117,8 +125,10 @@ Return only the clean story text, without additional explanations or markup.`;
     console.log('📊 Segment count:', segmentCount);
     console.log('⏱️  Segment duration:', segmentDuration, 'seconds');
 
-    const systemPrompt = `You are an expert at creating prompts for AI video generation.
+const systemPrompt = `You are an expert at creating prompts for AI video generation.
 Your task is to split the story text into segments and create visual prompts for each segment.
+
+CRITICAL HARD RULE: DO NOT ask the image/video generator to render specific text, words, brand names, or letters (e.g., DO NOT write 'a sign that says "Cafe"', or 'logo with text "Brand"'). AI models cannot render text accurately and will output gibberish slop. If a logo or sign is needed, describe the visual composition and shapes only, without explicit words.
 
 REQUIREMENTS:
 - Divide the text into ${segmentCount} segments (${segmentDuration} seconds each for a ${duration}-second video)
@@ -127,13 +137,26 @@ REQUIREMENTS:
 - Each prompt should describe a specific visual scene
 - Use cinematic terms: camera angle, lighting, movement, composition
 - Prompts should be consistent with each other (unified style, characters, locations)
+${referenceImages.length > 0 ? `
+REFERENCE IMAGES:
+You have access to the following reference images provided by the user:
+${JSON.stringify(referenceImages.map(img => ({ id: img.id, description: img.description })), null, 2)}
+You can map a reference image to a segment by specifying its ID in "referenceImageIndex".
+You MUST choose a "referenceAction":
+- "direct_use": The video generator will use this exact image WITHOUT modifying it. PERFECT for logos, app screens, or exact banners at the end of the video.
+- "img2img": The image generator will use this image as a base and modify it heavily based on your text prompt. PERFECT for character faces or retaining styles during active scenes.
+If no reference is needed for a scene, pass null for both.
+` : ''}
 
 RESPONSE FORMAT:
-Return only a JSON array of EXACTLY ${segmentCount} prompts:
-["prompt 1", "prompt 2", "prompt 3", ...]
-
-PROMPT EXAMPLE:
-"Cinematic shot of a truck driver at sunset, warm golden hour lighting, camera slowly pushing in, documentary style, realistic, 4k quality"`;
+Return only a JSON array of EXACTLY ${segmentCount} objects:
+[
+  {
+    "prompt": "Cinematic shot of a truck driver at sunset, warm golden hour lighting...",
+    "referenceImageIndex": null,
+    "referenceAction": null
+  }
+]`;
 
     console.log('\n🔄 Generating prompts...');
 
@@ -153,13 +176,16 @@ PROMPT EXAMPLE:
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     const jsonString = jsonMatch ? jsonMatch[0] : content;
 
-    const prompts: string[] = JSON.parse(jsonString);
+    const prompts: PromptMapping[] = JSON.parse(jsonString);
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
 
     console.log(`\n✅ Generated prompts: ${prompts.length} - ${totalTime}s`);
-    prompts.forEach((prompt, i) => {
-      console.log(`\n  ${i + 1}. ${prompt.substring(0, 80)}...`);
+    prompts.forEach((p, i) => {
+      console.log(`\n  ${i + 1}. ${p.prompt.substring(0, 80)}...`);
+      if (p.referenceImageIndex !== null && p.referenceImageIndex !== undefined) {
+        console.log(`     🖼️  Mapped reference #${p.referenceImageIndex} [${p.referenceAction}]`);
+      }
     });
     console.log('='.repeat(60) + '\n');
 

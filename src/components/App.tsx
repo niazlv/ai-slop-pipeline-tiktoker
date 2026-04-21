@@ -5,33 +5,35 @@ import { useTranslation } from 'react-i18next';
 import { DurationSelector } from './DurationSelector';
 import { AspectRatioSelector } from './AspectRatioSelector';
 import { StoryVariantSelector } from './StoryVariantSelector';
-import { ReferenceImageSelector } from './ReferenceImageSelector';
+import { ReferenceImagesSelector } from './ReferenceImagesSelector';
 import { StyleCustomization } from './StyleCustomization';
 import { VoiceSelector } from './VoiceSelector';
 import { VideoGeneration } from './VideoGeneration';
 import { StepsReview } from './StepsReview';
 import { TextGenerationResult } from '../api/text-generator-client';
-import { VideoStep } from '../types/video-step';
+import { VideoStep, ReferenceImage } from '../types/video-step';
 
 type Step = 'input' | 'selecting-duration' | 'selecting-aspect' | 'selecting-variant' | 'selecting-reference' | 'customizing-style' | 'selecting-voice' | 'reviewing-steps' | 'generating-videos' | 'done';
 
 interface AppProps {
   useFreeModels?: boolean;
+  resumeSessionPath?: string;
   onExit: () => void;
 }
 
-export const App: React.FC<AppProps> = ({ useFreeModels = false, onExit }) => {
+export const App: React.FC<AppProps> = ({ useFreeModels = false, resumeSessionPath, onExit }) => {
   const { t } = useTranslation();
-  const [step, setStep] = useState<Step>('input');
+  const [step, setStep] = useState<Step>(resumeSessionPath ? 'generating-videos' : 'input');
   const [description, setDescription] = useState('');
   const [duration, setDuration] = useState<number>(60);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('9:16');
   const [variants, setVariants] = useState<TextGenerationResult[]>([]);
   const [selectedVariant, setSelectedVariant] = useState<TextGenerationResult | null>(null);
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [stylePrompt, setStylePrompt] = useState<string>('');
   const [voiceId, setVoiceId] = useState<string>('3EuKHIEZbSzrHGNmdYsx'); // Default: Josh
   const [videoSteps, setVideoSteps] = useState<VideoStep[]>([]);
+  const [sessionPath, setSessionPath] = useState<string>(resumeSessionPath || '');
 
   const handleDescriptionSubmit = (value: string) => {
     setDescription(value);
@@ -53,8 +55,8 @@ export const App: React.FC<AppProps> = ({ useFreeModels = false, onExit }) => {
     setStep('selecting-reference');
   };
 
-  const handleReferenceSelect = (imagePath: string | null) => {
-    setReferenceImage(imagePath);
+  const handleReferenceSelect = (images: ReferenceImage[]) => {
+    setReferenceImages(images);
     setStep('customizing-style');
   };
 
@@ -68,8 +70,9 @@ export const App: React.FC<AppProps> = ({ useFreeModels = false, onExit }) => {
     setStep('reviewing-steps');
   };
 
-  const handleStepsReviewComplete = (steps: VideoStep[]) => {
+  const handleStepsReviewComplete = (steps: VideoStep[], reviewSessionPath: string) => {
     setVideoSteps(steps);
+    setSessionPath(reviewSessionPath);
     setStep('generating-videos');
   };
 
@@ -124,7 +127,7 @@ export const App: React.FC<AppProps> = ({ useFreeModels = false, onExit }) => {
       )}
 
       {step === 'selecting-reference' && (
-        <ReferenceImageSelector onSelect={handleReferenceSelect} />
+        <ReferenceImagesSelector onComplete={handleReferenceSelect} />
       )}
 
       {step === 'customizing-style' && (
@@ -140,23 +143,24 @@ export const App: React.FC<AppProps> = ({ useFreeModels = false, onExit }) => {
           storyText={selectedVariant.text}
           duration={duration}
           aspectRatio={aspectRatio}
-          referenceImage={referenceImage}
+          referenceImages={referenceImages}
           stylePrompt={stylePrompt}
           useFreeModels={useFreeModels}
           onComplete={handleStepsReviewComplete}
         />
       )}
 
-      {step === 'generating-videos' && selectedVariant && (
+      {step === 'generating-videos' && (resumeSessionPath || selectedVariant) && (
         <VideoGeneration
-          storyText={selectedVariant.text}
+          storyText={selectedVariant?.text || ''}
           duration={duration}
           aspectRatio={aspectRatio}
-          referenceImage={referenceImage}
+          referenceImages={referenceImages}
           stylePrompt={stylePrompt}
           voiceId={voiceId}
           videoSteps={videoSteps}
           useFreeModels={useFreeModels}
+          sessionPath={sessionPath}
           onComplete={handleComplete}
         />
       )}

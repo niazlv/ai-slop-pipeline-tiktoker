@@ -3,9 +3,9 @@ import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
-import { VideoStep } from '../types/video-step';
+import { VideoStep, ReferenceImage } from '../types/video-step';
 import { FluxClient } from '../api/flux-client';
-import { TextGeneratorClient } from '../api/text-generator-client';
+import { TextGeneratorClient, PromptMapping } from '../api/text-generator-client';
 import { SessionManager } from '../utils/session-manager';
 import { ImageUploader } from '../utils/image-uploader';
 import fs from 'fs';
@@ -15,10 +15,10 @@ interface StepsReviewProps {
   storyText: string;
   duration: number;
   aspectRatio: '16:9' | '9:16';
-  referenceImage: string | null;
+  referenceImages: ReferenceImage[];
   stylePrompt: string;
   useFreeModels?: boolean;
-  onComplete: (steps: VideoStep[]) => void;
+  onComplete: (steps: VideoStep[], sessionPath: string) => void;
 }
 
 type Stage = 'generating-prompts' | 'prompts-ready' | 'generating-initial' | 'review' | 'regenerating' | 'uploading' | 'complete';
@@ -28,7 +28,7 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
   storyText,
   duration,
   aspectRatio,
-  referenceImage,
+  referenceImages,
   stylePrompt,
   useFreeModels = false,
   onComplete,
@@ -39,7 +39,7 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
   const [fluxClient] = useState(() => new FluxClient(undefined, useFreeModels));
   const [textGenerator] = useState(() => new TextGeneratorClient(useFreeModels));
   const [session] = useState(() => new SessionManager());
-  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
+  const [referenceImageUrls, setReferenceImageUrls] = useState<Map<number, string>>(new Map());
   const [progress, setProgress] = useState('');
   const [editMode, setEditMode] = useState<EditMode>('none');
   const [editedPrompt, setEditedPrompt] = useState('');
@@ -50,28 +50,33 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
     const initializeSteps = async () => {
       // Generate prompts first
       setProgress('Generating video prompts...');
-      const prompts = await textGenerator.generateVideoPrompts(storyText, duration);
+      const prompts: PromptMapping[] = await textGenerator.generateVideoPrompts(storyText, duration, referenceImages);
       console.log(`Generated ${prompts.length} prompts`);
 
-      // Upload reference image if provided
-      if (referenceImage) {
+      // Upload all reference images
+      const urlMap = new Map<number, string>();
+      for (const ref of referenceImages) {
         try {
-          const url = await ImageUploader.uploadImage(referenceImage);
-          setReferenceImageUrl(url);
+          const url = await ImageUploader.uploadImage(ref.path);
+          urlMap.set(ref.id, url);
+          console.log(`✅ Uploaded reference #${ref.id}: ${ref.description}`);
         } catch (error) {
-          console.error('Failed to upload reference image:', error);
+          console.error(`Failed to upload reference image #${ref.id}:`, error);
         }
       }
+      setReferenceImageUrls(urlMap);
 
       // Initialize steps from prompts
-      const initialSteps: VideoStep[] = prompts.map((prompt, index) => ({
+      const initialSteps: VideoStep[] = prompts.map((mapping, index) => ({
         index,
-        prompt,
+        prompt: mapping.prompt,
         imagePath: null,
         imageUrl: null,
         duration: 4, // Default duration
         isGenerating: false,
         error: null,
+        referenceImageIndex: mapping.referenceImageIndex ?? null,
+        referenceAction: mapping.referenceAction ?? null,
       }));
 
       setSteps(initialSteps);
@@ -92,13 +97,30 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
         }
 
         const imagePath = session.getImagePath(index + 1);
-        const imageUrl = await fluxClient.generateImage(
-          step.prompt,
-          imagePath,
-          aspectRatio,
-          referenceImageUrl || undefined,
-          stylePrompt || undefined
-        );
+        let imageUrl: string;
+
+        // Handle direct_use: use the uploaded reference image directly
+        if (step.referenceAction === 'direct_use' && step.referenceImageIndex != null) {
+          const refUrl = referenceImageUrls.get(step.referenceImageIndex);
+          if (refUrl) {
+            imageUrl = refUrl;
+            // Copy the reference image to session folder
+            const refImage = referenceImages.find(r => r.id === step.referenceImageIndex);
+            if (refImage) {
+              fs.copyFileSync(refImage.path, imagePath);
+            }
+            console.log(`🖼️ Step ${index + 1}: Using reference #${step.referenceImageIndex} directly (no Flux)`);
+          } else {
+            // Fallback to normal generation
+            imageUrl = await fluxClient.generateImage(step.prompt, imagePath, aspectRatio, undefined, stylePrompt || undefined);
+          }
+        } else {
+          // img2img or no reference
+          const refUrl = (step.referenceAction === 'img2img' && step.referenceImageIndex != null)
+            ? referenceImageUrls.get(step.referenceImageIndex)
+            : undefined;
+          imageUrl = await fluxClient.generateImage(step.prompt, imagePath, aspectRatio, refUrl || undefined, stylePrompt || undefined);
+        }
 
         setSteps((prev) => {
           const updated = [...prev];
@@ -139,11 +161,16 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
 
     try {
       const imagePath = session.getImagePath(stepIndex + 1);
+      const step = steps[stepIndex];
+      let refUrl: string | undefined;
+      if (step?.referenceAction === 'img2img' && step?.referenceImageIndex != null) {
+        refUrl = referenceImageUrls.get(step.referenceImageIndex) || undefined;
+      }
       const imageUrl = await fluxClient.generateImage(
         prompt,
         imagePath,
         aspectRatio,
-        referenceImageUrl || undefined,
+        refUrl,
         stylePrompt || undefined
       );
 
@@ -242,7 +269,7 @@ export const StepsReview: React.FC<StepsReviewProps> = ({
     }
 
     setStage('complete');
-    onComplete(steps);
+    onComplete(steps, session.getPaths().root);
   };
 
   if (stage === 'generating-prompts') {

@@ -13,26 +13,37 @@ export class SessionManager {
   private sessionId: string;
   private paths: SessionPaths;
 
-  constructor(baseDir: string = './output') {
-    // Create unique session ID based on timestamp
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    this.sessionId = `session_${timestamp}`;
+  constructor(baseDir: string = './output', existingSessionPath?: string) {
+    if (existingSessionPath) {
+      this.sessionId = path.basename(existingSessionPath);
+      this.paths = {
+        root: existingSessionPath,
+        images: path.join(existingSessionPath, 'images'),
+        videos: path.join(existingSessionPath, 'videos'),
+        audio: path.join(existingSessionPath, 'audio'),
+        result: path.join(existingSessionPath, 'result'),
+      };
+      console.log('\n📁 Resuming/reusing session:', this.sessionId);
+    } else {
+      // Create unique session ID based on timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      this.sessionId = `session_${timestamp}`;
 
-    // Create folder structure
-    const rootPath = path.join(baseDir, this.sessionId);
+      // Create folder structure
+      const rootPath = path.join(baseDir, this.sessionId);
 
-    this.paths = {
-      root: rootPath,
-      images: path.join(rootPath, 'images'),
-      videos: path.join(rootPath, 'videos'),
-      audio: path.join(rootPath, 'audio'),
-      result: path.join(rootPath, 'result'),
-    };
+      this.paths = {
+        root: rootPath,
+        images: path.join(rootPath, 'images'),
+        videos: path.join(rootPath, 'videos'),
+        audio: path.join(rootPath, 'audio'),
+        result: path.join(rootPath, 'result'),
+      };
+      console.log('\n📁 Session created:', this.sessionId);
+    }
 
     // Create all folders
     this.createDirectories();
-
-    console.log('\n📁 Session created:', this.sessionId);
     console.log('   📂 Folder:', this.paths.root);
   }
 
@@ -74,6 +85,14 @@ export class SessionManager {
 
   getMetadataPath(): string {
     return path.join(this.paths.root, 'metadata.json');
+  }
+
+  getSubtitlePath(): string {
+    return path.join(this.paths.result, 'subtitles.ass');
+  }
+
+  getPipelineStatePath(): string {
+    return path.join(this.paths.root, 'pipeline-state.json');
   }
 
   saveMetadata(data: Record<string, unknown>): void {

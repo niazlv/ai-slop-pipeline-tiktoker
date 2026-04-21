@@ -1,14 +1,16 @@
-import { TextGeneratorClient } from '../api/text-generator-client';
+import { TextGeneratorClient, PromptMapping } from '../api/text-generator-client';
 import { Veo3Client } from '../api/fal-veo3-client';
 import { ElevenLabsTTSClient } from '../api/elevenlabs-client';
+import { SpeechToTextClient } from '../api/fal-speech-client';
 import { FluxClient } from '../api/flux-client';
 import { VideoMerger } from '../utils/video-merger';
 import { VideoDownloader } from '../utils/video-downloader';
 import { SessionManager } from '../utils/session-manager';
 import { ImageUploader } from '../utils/image-uploader';
 import { RetryHelper } from '../utils/retry-helper';
-import { VideoStep } from '../types/video-step';
+import { VideoStep, ReferenceImage } from '../types/video-step';
 import { CostCalculator } from '../utils/cost-calculator';
+import { generateSubtitleFile, SubtitleWord } from '../utils/subtitle-generator';
 
 interface VideoGenerationResult {
   index: number;
@@ -26,17 +28,17 @@ export class VideoGenerationWorkflow {
   private videoMerger: VideoMerger;
   private videoDownloader: VideoDownloader;
   private session: SessionManager;
-  private referenceImageUrl: string | null = null;
+  private referenceImageUrls: Map<number, string> = new Map();
   private costCalculator: CostCalculator;
 
-  constructor(useFreeModels: boolean = false) {
+  constructor(useFreeModels: boolean = false, existingSessionPath?: string) {
     this.textGenerator = new TextGeneratorClient(useFreeModels);
     this.veo3Client = new Veo3Client(undefined, useFreeModels);
     this.ttsClient = new ElevenLabsTTSClient();
     this.fluxClient = new FluxClient(undefined, useFreeModels);
     this.videoMerger = new VideoMerger();
     this.videoDownloader = new VideoDownloader();
-    this.session = new SessionManager();
+    this.session = new SessionManager('./output', existingSessionPath);
 
     // Initialize cost calculator with current models
     this.costCalculator = new CostCalculator(
@@ -48,11 +50,11 @@ export class VideoGenerationWorkflow {
     this.session.printSummary();
   }
 
-  async generateVideoPrompts(storyText: string, duration: number = 60): Promise<string[]> {
+  async generateVideoPrompts(storyText: string, duration: number = 60, referenceImages: ReferenceImage[] = []): Promise<PromptMapping[]> {
     // Wrap in retry for error resilience
     return await RetryHelper.retry(
       async () => {
-        return await this.textGenerator.generateVideoPrompts(storyText, duration);
+        return await this.textGenerator.generateVideoPrompts(storyText, duration, referenceImages);
       },
       {
         maxAttempts: 3,
@@ -71,7 +73,7 @@ export class VideoGenerationWorkflow {
     prompts: string[],
     duration: number = 60,
     aspectRatio: '16:9' | '9:16' = '9:16',
-    referenceImagePath: string | null = null,
+    referenceImages: ReferenceImage[] = [],
     stylePrompt: string = '',
     onProgress?: (current: number, total: number) => void,
     videoSteps?: VideoStep[]
@@ -89,15 +91,14 @@ export class VideoGenerationWorkflow {
       console.log(`🎨 Image style: ${stylePrompt}`);
     }
 
-    // If reference image specified, upload it once
-    if (referenceImagePath) {
+    // If reference images specified, upload them all
+    for (const ref of referenceImages) {
       try {
-        this.referenceImageUrl = await ImageUploader.uploadImage(referenceImagePath);
-        console.log('✅ Reference image ready to use');
+        const url = await ImageUploader.uploadImage(ref.path);
+        this.referenceImageUrls.set(ref.id, url);
+        console.log(`✅ Reference #${ref.id} (${ref.description}) uploaded`);
       } catch (error) {
-        console.error('❌ Reference image upload error:', error);
-        console.log('⚠️  Continuing without reference image');
-        this.referenceImageUrl = null;
+        console.error(`❌ Reference image #${ref.id} upload error:`, error);
       }
     }
 
@@ -125,35 +126,61 @@ export class VideoGenerationWorkflow {
       try {
         return await RetryHelper.retry(
           async () => {
-            let imageUrl: string;
+              const step = videoSteps?.[i];
+              // Handle direct_use: skip Flux AND skip Veo3! Return static banner video instead
+              if (step?.referenceAction === 'direct_use' && step?.referenceImageIndex != null) {
+                const refObj = referenceImages[step.referenceImageIndex];
+                if (refObj) {
+                  console.log(`🖼️  Video ${i + 1}: Using static banner from reference #${step.referenceImageIndex}`);
+                  // Create a static video from the image directly using ffmpeg
+                  const durationSec = stepVideoDuration === '4s' ? 4 : parseInt(stepVideoDuration || '5');
+                  const bannerPath = await this.createBannerVideo(refObj.path, durationSec);
+                  
+                  // Copy to expected video path
+                  const videoPath = this.session.getVideoPath(i + 1);
+                  await import('fs/promises').then(fs => fs.copyFile(bannerPath, videoPath));
+                  
+                  return {
+                    index: i,
+                    path: videoPath,
+                    success: true,
+                  } as VideoGenerationResult; // Skip Veo3 generation!
+                }
+              }
 
-            // Use prepared image if available, otherwise generate new one
-            if (videoSteps?.[i]?.imageUrl) {
-              imageUrl = videoSteps[i].imageUrl!;
-              console.log(`✅ Using prepared image for video ${i + 1}`);
-              // Track image generation cost (image was generated earlier in StepsReview)
-              this.costCalculator.addImage(1);
-            } else {
-              // Generate image from prompt and save it
-              const imagePath = this.session.getImagePath(i + 1);
-              imageUrl = await this.fluxClient.generateImage(
+              let imageUrl: string;
+
+              // Use prepared image if available, otherwise generate new one
+              if (step?.imageUrl) {
+                imageUrl = step.imageUrl;
+                console.log(`✅ Using prepared image for video ${i + 1}`);
+                // Track image generation cost (image was generated earlier in StepsReview)
+                this.costCalculator.addImage(1);
+              } else {
+                // Normal image generation (img2img or no reference)
+                const imagePath = this.session.getImagePath(i + 1);
+                let refUrl: string | undefined;
+                if (step?.referenceAction === 'img2img' && step?.referenceImageIndex != null) {
+                  refUrl = this.referenceImageUrls.get(step.referenceImageIndex) || undefined;
+                }
+                imageUrl = await this.fluxClient.generateImage(
+                  prompt,
+                  imagePath,
+                  aspectRatio,
+                  refUrl,
+                  stylePrompt || undefined
+                );
+                // Track image generation cost
+                this.costCalculator.addImage(1);
+              }
+
+              // Then generate video from image
+              const result = await this.veo3Client.generateVideo(
                 prompt,
-                imagePath,
-                aspectRatio,
-                this.referenceImageUrl || undefined,
-                stylePrompt || undefined
+                imageUrl,
+                stepVideoDuration,
+                aspectRatio
               );
-              // Track image generation cost
-              this.costCalculator.addImage(1);
-            }
-
-            // Then generate video from image
-            const result = await this.veo3Client.generateVideo(
-              prompt,
-              imageUrl,
-              stepVideoDuration,
-              aspectRatio
-            );
 
             // Track video generation cost
             this.costCalculator.addVideo(1);
@@ -289,13 +316,31 @@ export class VideoGenerationWorkflow {
   }
 
 
-  async mergeVideos(videoPaths: string[]): Promise<string> {
+  async mergeVideos(videoPaths: string[]): Promise<{ outputPath: string, duration: number }> {
     const startTime = Date.now();
     const result = await this.videoMerger.mergeVideos(videoPaths, this.session.getPaths().result);
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`⏱️  Video merging time: ${totalTime}s`);
-    // Return actual created file path
-    return result.outputPath;
+    // Return actual created file path and duration
+    return result;
+  }
+
+  async createBannerVideo(imagePath: string, durationSec: number = 4): Promise<string> {
+    const startTime = Date.now();
+    console.log('\n🖼️ Creating banner video...');
+    const result = await this.videoMerger.createBannerVideo(imagePath, durationSec, this.session.getPaths().videos);
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`⏱️  Banner creation time: ${totalTime}s`);
+    return result;
+  }
+
+  async mergeWithCrossfade(videoPath1: string, videoPath2: string, duration1: number, crossfadeDuration: number = 1): Promise<{ outputPath: string, duration: number }> {
+    const startTime = Date.now();
+    console.log('\n🎬 Merging with crossfade...');
+    const result = await this.videoMerger.mergeWithCrossfade(videoPath1, videoPath2, duration1, crossfadeDuration, this.session.getPaths().result);
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`⏱️  Crossfade merge time: ${totalTime}s`);
+    return result;
   }
 
   async addAudioToVideo(videoPath: string, audioPath: string): Promise<string> {
@@ -307,6 +352,46 @@ export class VideoGenerationWorkflow {
     return finalPath;
   }
 
+  async transcribeAudio(audioPath: string): Promise<{ words: SubtitleWord[]; fullText: string }> {
+    const startTime = Date.now();
+    console.log('\n🎙️ Transcribing audio for subtitles...');
+
+    // Upload audio to FAL storage for STT (can't use ImageUploader — it only accepts image extensions)
+    const audioBuffer = (await import('fs')).readFileSync(audioPath);
+    const ext = (await import('path')).extname(audioPath).slice(1) || 'mp3';
+    const blob = new Blob([audioBuffer], { type: `audio/${ext}` });
+    const file = new File([blob], (await import('path')).basename(audioPath), { type: blob.type });
+    const { fal } = await import('@fal-ai/client');
+    fal.config({ credentials: process.env.FAL_API_KEY! });
+    const audioUrl = await fal.storage.upload(file);
+    console.log('✅ Audio uploaded for transcription:', audioUrl);
+
+    const sttClient = new SpeechToTextClient();
+    const result = await sttClient.transcribe(audioUrl);
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`⏱️  Transcription time: ${totalTime}s`);
+    console.log(`📝 Words transcribed: ${result.words.length}`);
+
+    return {
+      words: result.words,
+      fullText: result.fullText,
+    };
+  }
+
+  generateSubtitles(words: SubtitleWord[], aspectRatio: '16:9' | '9:16' = '9:16'): string {
+    const subtitlePath = this.session.getSubtitlePath();
+    return generateSubtitleFile(words, subtitlePath, aspectRatio);
+  }
+
+  async burnSubtitles(videoPath: string, subtitlePath: string): Promise<string> {
+    const startTime = Date.now();
+    const result = await this.videoMerger.burnSubtitles(videoPath, subtitlePath, this.session.getPaths().result);
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`⏱️  Subtitle burning time: ${totalTime}s`);
+    return result;
+  }
+
   async runComplete(storyText: string, description: string): Promise<string> {
     const workflowStartTime = Date.now();
 
@@ -316,7 +401,8 @@ export class VideoGenerationWorkflow {
 
     // 1. Generate video prompts
     console.log('\n📝 Step 1: Generating video prompts...');
-    const prompts = await this.generateVideoPrompts(storyText);
+    const promptMappings = await this.generateVideoPrompts(storyText);
+    const prompts = promptMappings.map(m => m.prompt);
     console.log(`✅ Created ${prompts.length} prompts\n`);
 
     // 2. Generate videos (with images) - videos downloaded automatically
@@ -331,12 +417,12 @@ export class VideoGenerationWorkflow {
 
     // 4. Merge videos
     console.log('\n🎞️ Step 4: Merging videos...');
-    const mergedVideoPath = await this.mergeVideos(videoPaths);
-    console.log(`✅ Videos merged: ${mergedVideoPath}\n`);
+    const mergedVideoResult = await this.mergeVideos(videoPaths);
+    console.log(`✅ Videos merged: ${mergedVideoResult.outputPath}\n`);
 
     // 5. Add audio
     console.log('\n🎵 Step 5: Adding narration...');
-    const finalVideoPath = await this.addAudioToVideo(mergedVideoPath, audioPath);
+    const finalVideoPath = await this.addAudioToVideo(mergedVideoResult.outputPath, audioPath);
     console.log(`✅ Final video: ${finalVideoPath}\n`);
 
     // 6. Save metadata
