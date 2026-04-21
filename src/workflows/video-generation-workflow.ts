@@ -179,7 +179,15 @@ export class VideoGenerationWorkflow {
                 prompt,
                 imageUrl,
                 stepVideoDuration,
-                aspectRatio
+                aspectRatio,
+                undefined, // userPrompt
+                (status, queuePosition, progress) => {
+                  // Update progress for this specific video
+                  if (onProgress) {
+                    const progressText = `Видео ${i + 1}/${prompts.length}: ${status}${queuePosition ? ` (позиция ${queuePosition})` : ''}${progress ? ` ${progress}%` : ''}`;
+                    console.log(`📊 ${progressText}`);
+                  }
+                }
               );
 
             // Track video generation cost

@@ -71,6 +71,25 @@ export class FalBaseClient {
         console.error('   Status code:', (error as Record<string, unknown>).status)
       }
 
+      // Check for specific error types and provide helpful messages
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      if (errorMessage.includes('Exhausted balance') || errorMessage.includes('User is locked')) {
+        throw new Error('Недостаточно средств на аккаунте FAL.AI. Необходимо пополнить баланс на fal.ai/dashboard/billing для продолжения генерации видео.');
+      }
+      
+      if (errorMessage.includes('Forbidden') || errorMessage.includes('403')) {
+        throw new Error('API access forbidden. Please check: 1) API key validity, 2) Model access permissions, 3) Account credits/limits. Try using free models or contact FAL support.');
+      }
+      
+      if (errorMessage.includes('Unauthorized') || errorMessage.includes('401')) {
+        throw new Error('API key is invalid or expired. Please check your FAL_API_KEY in .env file.');
+      }
+      
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+        throw new Error('Rate limit exceeded. Please wait a few minutes before trying again or upgrade your FAL account.');
+      }
+
       throw error;
     }
   }
@@ -137,13 +156,18 @@ export class FalBaseClient {
     }
   }
 
-  async waitForCompletion(jobId: string, maxAttempts = 300, delayMs = 2000): Promise<Record<string, unknown>> {
+  async waitForCompletion(jobId: string, maxAttempts = 300, delayMs = 2000, onProgress?: (status: string, queuePosition?: number, progress?: number) => void): Promise<Record<string, unknown>> {
     console.log(`⏳ Starting polling for job ${jobId}`)
 
     for (let i = 0; i < maxAttempts; i++) {
       const status = await this.checkStatus(jobId);
 
       console.log(`🔄 Poll ${i + 1}/${maxAttempts} - Status: ${status.status}${status.queue_position ? `, Queue position: ${status.queue_position}` : ''}${status.progress ? `, Progress: ${status.progress}%` : ''}`)
+
+      // Call progress callback if provided (for bot status updates)
+      if (onProgress && (i % 5 === 0 || status.status !== 'IN_QUEUE')) { // Update every 5th poll or when status changes
+        onProgress(status.status, status.queue_position, status.progress);
+      }
 
       if (status.status === 'COMPLETED' && status.response_url) {
         console.log('✅ Job completed! Fetching result...')

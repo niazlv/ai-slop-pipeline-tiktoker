@@ -7,10 +7,12 @@ const MAX_VIDEO_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 const STAGE_LABELS: Record<string, string> = {
   story_generation: '📝 Генерация истории...',
   prompt_generation: '✍️ Генерация промптов...',
-  image_generation: '🖼 Генерация изображений...',
+  image_generation: '🖼️ Генерация изображений...',
   video_generation: '🎬 Генерация видео...',
   audio_generation: '🎵 Генерация аудио...',
-  merging: '🎞 Сборка финального видео...',
+  transcription: '🎙️ Транскрипция аудио...',
+  subtitle_generation: '📝 Создание субтитров...',
+  merging: '🎞️ Сборка финального видео...',
 };
 
 export class NotificationService {
@@ -72,10 +74,20 @@ export class NotificationService {
     );
   }
 
-  formatProgressText(stage: string, current?: number, total?: number): string {
+  formatProgressText(stage: string, current?: number, total?: number, details?: string): string {
+    const timestamp = new Date().toLocaleTimeString('ru-RU', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    });
+    
     if (stage === 'video_generation' && current !== undefined && total !== undefined) {
-      return `🎬 Видео: ${current}/${total} сегментов`;
+      const baseText = `🎬 Видео: ${current}/${total} сегментов`;
+      const timeText = `⏰ ${timestamp}`;
+      return details ? `${baseText}\n${details}\n${timeText}` : `${baseText}\n${timeText}`;
     }
-    return STAGE_LABELS[stage] ?? `⏳ ${stage}`;
+    
+    const stageText = STAGE_LABELS[stage] ?? `⏳ ${stage}`;
+    return `${stageText}\n⏰ ${timestamp}`;
   }
 }

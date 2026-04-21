@@ -45,6 +45,42 @@ export class KeyboardBuilder {
     };
   }
 
+  static generationModeKeyboard(): InlineKeyboardMarkup {
+    return {
+      inline_keyboard: [
+        [{ text: '🚀 Быстрая генерация', callback_data: `${CALLBACK_PREFIXES.GEN_MODE}:simple` }],
+        [{ text: '🎛 Детальный контроль', callback_data: `${CALLBACK_PREFIXES.GEN_MODE}:detailed` }],
+      ],
+    };
+  }
+
+  static subtitlesKeyboard(): InlineKeyboardMarkup {
+    return {
+      inline_keyboard: [[
+        { text: '✅ Да, добавить субтитры', callback_data: `${CALLBACK_PREFIXES.SUBTITLES}:yes` },
+        { text: '❌ Без субтитров', callback_data: `${CALLBACK_PREFIXES.SUBTITLES}:no` },
+      ]],
+    };
+  }
+
+  static storyReviewKeyboard(): InlineKeyboardMarkup {
+    return {
+      inline_keyboard: [[
+        { text: '✅ Сценарий хороший', callback_data: CALLBACK_PREFIXES.STORY_OK },
+        { text: '✏️ Изменить сценарий', callback_data: CALLBACK_PREFIXES.STORY_EDIT },
+      ]],
+    };
+  }
+
+  static promptsReviewKeyboard(): InlineKeyboardMarkup {
+    return {
+      inline_keyboard: [[
+        { text: '✅ Промпты подходят', callback_data: CALLBACK_PREFIXES.PROMPTS_OK },
+        { text: '✏️ Изменить промпты', callback_data: CALLBACK_PREFIXES.PROMPTS_EDIT },
+      ]],
+    };
+  }
+
   static confirmationKeyboard(): InlineKeyboardMarkup {
     return {
       inline_keyboard: [[

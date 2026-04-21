@@ -26,6 +26,7 @@ export interface Veo3Result {
 export class Veo3Client extends FalBaseClient {
   private isSeedanceModel: boolean;
   private isHailuoModel: boolean;
+  private useFreeModel: boolean;
 
   constructor(customApiKey?: string, useFreeModel: boolean = false) {
     const modelId = useFreeModel
@@ -33,13 +34,54 @@ export class Veo3Client extends FalBaseClient {
       : (process.env.FAL_VIDEO_MODEL || 'fal-ai/veo3.1/fast/image-to-video');
 
     super(modelId, customApiKey);
+    this.useFreeModel = useFreeModel;
     this.isSeedanceModel = modelId.includes('seedance');
     this.isHailuoModel = modelId.includes('hailuo') || modelId.includes('minimax');
-    console.log(`🎬 Using video model: ${modelId}${useFreeModel ? ' (FREE)' : ''}`);
+    
+    const modelType = useFreeModel ? ' (FREE)' : ' (PREMIUM)';
+    console.log(`🎬 Using video model: ${modelId}${modelType}`);
+    
+    if (useFreeModel) {
+      console.log('💡 Free model selected - using Hailuo 2.3 for cost savings');
+    }
   }
 
 
-  async generateVideo(prompt: string, imageUrl: string, videoDuration?: '4s' | '5s' | '6s' | '8s', aspectRatio?: '16:9' | '9:16', userPrompt?: string): Promise<Veo3Result> {
+  async generateVideo(prompt: string, imageUrl: string, videoDuration?: '4s' | '5s' | '6s' | '8s', aspectRatio?: '16:9' | '9:16', userPrompt?: string, onProgress?: (status: string, queuePosition?: number, progress?: number) => void): Promise<Veo3Result> {
+    try {
+      return await this.generateVideoInternal(prompt, imageUrl, videoDuration, aspectRatio, userPrompt, onProgress);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // If premium model fails with access issues and we're not already using free model, try free model
+      if (!this.useFreeModel && (
+        errorMessage.includes('Forbidden') || 
+        errorMessage.includes('access forbidden') || 
+        errorMessage.includes('API key') ||
+        errorMessage.includes('credits') ||
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('403')
+      )) {
+        console.log('⚠️  Premium model failed, attempting fallback to free model...');
+        console.log(`   Original error: ${errorMessage}`);
+        
+        try {
+          // Create a new client with free model
+          const freeClient = new Veo3Client(this.apiKey, true);
+          const result = await freeClient.generateVideoInternal(prompt, imageUrl, videoDuration, aspectRatio, userPrompt, onProgress);
+          console.log('✅ Fallback to free model successful!');
+          return result;
+        } catch (fallbackError) {
+          console.log('❌ Fallback to free model also failed:', fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+          throw error; // Throw original error
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  private async generateVideoInternal(prompt: string, imageUrl: string, videoDuration?: '4s' | '5s' | '6s' | '8s', aspectRatio?: '16:9' | '9:16', userPrompt?: string, onProgress?: (status: string, queuePosition?: number, progress?: number) => void): Promise<Veo3Result> {
     // Use the provided image URL directly
 
     // Default to 4s if not specified
@@ -124,7 +166,7 @@ export class Veo3Client extends FalBaseClient {
 
     const job = await this.submitJob(requestPayload);
 
-    const result = await this.waitForCompletion(job.jobId) as unknown as Veo3Output;
+    const result = await this.waitForCompletion(job.jobId, 300, 2000, onProgress) as unknown as Veo3Output;
 
     // 📤 VIDEO GENERATION OUTPUT
     console.log('\n📤 OUTPUT:');

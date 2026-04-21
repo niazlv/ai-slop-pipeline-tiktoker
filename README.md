@@ -3,7 +3,33 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 
-A powerful CLI application for automated AI-powered video generation. Create engaging short-form videos for TikTok, YouTube Shorts, and Instagram Reels in minutes.
+A powerful AI video generation platform with both CLI and Telegram bot interfaces. Create engaging short-form videos for TikTok, YouTube Shorts, and Instagram Reels in minutes.
+
+## 🚀 Two Ways to Use TikToker
+
+### 🤖 Telegram Bot (Recommended)
+**Easy-to-use bot interface with real-time progress tracking**
+
+- 📱 **Simple Interface** - Just send a message to start
+- 📊 **Real-time Progress** - See generation status with timestamps
+- 🔄 **Auto-Recovery** - Automatic fallback to free models
+- 🎛️ **Two Modes** - Quick generation or detailed control
+- 📝 **Subtitle Support** - Optional subtitle generation
+- ✏️ **Story Editing** - Review and edit generated scenarios
+
+**Bot Username**: `@arendok_ai_grok_gen_bot`
+
+[📱 User Guide](docs/USER_GUIDE.md) | [🔧 Bot Features](docs/BOT_FEATURES.md)
+
+### 💻 CLI Application
+**Advanced interface for power users**
+
+- 🎨 **20+ Style Presets** - From photorealistic to anime
+- 🖼️ **Reference Images** - Maintain consistent visual style
+- ⚡ **Parallel Generation** - 5-10x faster than sequential
+- 📁 **Session Management** - Organized output folders
+
+[📖 CLI Documentation](#-cli-usage)
 
 ## 🎥 Demo
 
@@ -13,7 +39,40 @@ A powerful CLI application for automated AI-powered video generation. Create eng
 >
 > **Example output**: A 30-second video about a cyberpunk detective, generated completely from a single text prompt.
 
-## 🔄 How It Works
+## 🤖 Telegram Bot Features
+
+### 📊 Real-time Progress Tracking
+```
+🎬 Видео: 2/4 сегментов
+Видео 2/4: IN_PROGRESS 45%
+⏰ 15:07:42
+```
+
+### 🎛️ Two Generation Modes
+
+#### 🚀 Quick Generation
+- Fast, automated process
+- No intermediate steps
+- Perfect for quick content
+
+#### 🎛️ Detailed Control
+- **Story Review** - Edit generated scenarios
+- **Prompt Display** - See video prompts before generation
+- **Subtitle Support** - Optional subtitle generation
+- **Full Control** - Approve each step
+
+### 🔄 Smart Error Handling
+- **Auto-Fallback** - Switches to free models on API errors
+- **User-Friendly Messages** - Clear error explanations
+- **Retry Logic** - Automatic retry with exponential backoff
+
+### 📱 Bot Commands
+- `/start` - Begin video generation
+- `/status` - Check current generation progress
+- `/cancel` - Stop active generation
+- `/help` - Show available commands
+
+## 💻 CLI Usage
 
 TikToker uses a sophisticated AI pipeline to transform text descriptions into polished videos:
 
@@ -125,7 +184,22 @@ video_N.mp4 ─┘
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 🚀 Telegram Bot Setup
+
+The easiest way to use TikToker is through our Telegram bot:
+
+1. **Find the bot**: Search for `@arendok_ai_grok_gen_bot` in Telegram
+2. **Start chatting**: Send `/start` to begin
+3. **Describe your video**: Send a text description
+4. **Follow the prompts**: Choose duration, format, voice, etc.
+5. **Watch the progress**: Real-time updates with timestamps
+6. **Get your video**: Delivered directly to your chat
+
+**No setup required!** The bot handles all the technical details.
+
+### 💻 CLI Installation
+
+#### Prerequisites for CLI
 
 - Node.js 18 or higher
 - FFmpeg ([Installation guide](https://ffmpeg.org/download.html))
@@ -133,7 +207,7 @@ video_N.mp4 ─┘
   - [FAL.AI](https://fal.ai/dashboard) - For video/image generation
   - [OpenRouter](https://openrouter.ai/keys) - For text generation
 
-### Installation
+#### CLI Installation
 
 ```bash
 # Clone the repository
