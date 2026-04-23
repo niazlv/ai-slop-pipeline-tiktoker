@@ -83,17 +83,10 @@ export class TextGeneratorClient {
     this.fallbackConfigs.set('story', {
       requestType: 'story',
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
-        // Working OpenRouter models first (these actually work)
         'x-ai/grok-4.1-fast',
-        // Direct Gemini API - gemini-2.5-flash is current stable model
         'gemini-2.5-flash',
-        // Additional OpenRouter fallbacks
-        'anthropic/claude-3-haiku',
       ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct:free',
-        'mistralai/mistral-7b-instruct:free'
-      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
       maxRetries: maxRetries
     });
 
@@ -103,12 +96,8 @@ export class TextGeneratorClient {
       primaryModels: parseModelList('FALLBACK_PROMPTS_PRIMARY', [
         'x-ai/grok-4.1-fast',
         'gemini-2.5-flash',
-        'anthropic/claude-3-haiku',
       ]),
-      fallbackModels: parseModelList('FALLBACK_PROMPTS_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct:free',
-        'mistralai/mistral-7b-instruct:free'
-      ]),
+      fallbackModels: parseModelList('FALLBACK_PROMPTS_FALLBACK', []),
       maxRetries: maxRetries
     });
 
@@ -118,11 +107,8 @@ export class TextGeneratorClient {
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
         'x-ai/grok-4.1-fast',
         'gemini-2.5-flash',
-        'anthropic/claude-3-haiku',
       ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct:free',
-      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
       maxRetries: maxRetries
     });
 
@@ -132,11 +118,8 @@ export class TextGeneratorClient {
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
         'x-ai/grok-4.1-fast',
         'gemini-2.5-flash',
-        'anthropic/claude-3-haiku',
       ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct:free',
-      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
       maxRetries: maxRetries
     });
 
