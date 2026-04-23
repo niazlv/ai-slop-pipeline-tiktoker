@@ -220,7 +220,7 @@ export class TextGeneratorClient {
     throw finalError;
   }
 
-  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName?: string): Promise<string> {
+  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName?: string, maxOutputTokens: number = 2000): Promise<string> {
     const resolvedModel = modelName || process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
     if (!this.geminiClient) {
       const error = new Error('Google Gemini API key not configured');
@@ -238,7 +238,7 @@ export class TextGeneratorClient {
       model: resolvedModel,
       provider: 'google-gemini',
       temperature,
-      maxOutputTokens: 800,
+      maxOutputTokens,
       promptLength: prompt.length,
       systemPromptLength: systemPrompt.length,
       timestamp: new Date().toISOString()
@@ -251,7 +251,7 @@ export class TextGeneratorClient {
         model: resolvedModel,
         generationConfig: {
           temperature: temperature,
-          maxOutputTokens: 800,
+          maxOutputTokens,
         }
       });
 
@@ -407,13 +407,13 @@ Return only the clean story text, without additional explanations or markup.`;
             if (this.isGeminiModel(model)) {
               // Use direct Gemini API with correct model name
               const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
-              return await this.generateWithGemini(description, systemPrompt, temperature, geminiModel);
+              return await this.generateWithGemini(description, systemPrompt, temperature, geminiModel, 1500);
             } else {
               // Use OpenRouter
               return await this.generateWithOpenRouter([
                 { role: 'system', content: systemPrompt }, 
                 { role: 'user', content: description }
-              ], temperature, 800, model);
+              ], temperature, 1500, model);
             }
           }
         );
@@ -519,7 +519,7 @@ Return only a JSON array of EXACTLY ${segmentCount} objects:
           if (this.isGeminiModel(model)) {
             // Use direct Gemini API with correct model name
             const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
-            return await this.generateWithGemini(`Story text:\n\n${storyText}`, systemPrompt, 0.7, geminiModel);
+            return await this.generateWithGemini(`Story text:\n\n${storyText}`, systemPrompt, 0.7, geminiModel, 4000);
           } else {
             // Use OpenRouter
             return await this.generateWithOpenRouter([
@@ -530,9 +530,12 @@ Return only a JSON array of EXACTLY ${segmentCount} objects:
         }
       );
 
-      // Extract JSON from response (may be in markdown block)
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      const jsonString = jsonMatch ? jsonMatch[0] : content;
+      // Extract JSON from response (may be wrapped in markdown code block)
+      let cleanContent = content.trim();
+      // Strip ```json ... ``` or ``` ... ``` wrappers
+      cleanContent = cleanContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+      const jsonMatch = cleanContent.match(/\[[\s\S]*\]/);
+      const jsonString = jsonMatch ? jsonMatch[0] : cleanContent;
 
       const prompts: PromptMapping[] = JSON.parse(jsonString);
 
