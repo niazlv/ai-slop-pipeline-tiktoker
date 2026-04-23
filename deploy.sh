@@ -19,9 +19,13 @@ ssh $SERVER "systemctl stop $SERVICE_NAME || true"
 echo "📁 Creating remote directory..."
 ssh $SERVER "mkdir -p $REMOTE_DIR"
 
-# Build project locally
+# Build project locally (bot only - components use ink which has moduleResolution issues)
 echo "🔨 Building project..."
-npm run build
+npm run build:bot
+
+# Fix ESM imports (add .js extensions for Node.js ESM compatibility)
+echo "🔧 Fixing ESM imports..."
+node fix-imports.js
 
 # Copy files to server
 echo "📤 Uploading files..."
