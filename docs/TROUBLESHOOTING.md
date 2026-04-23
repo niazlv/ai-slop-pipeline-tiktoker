@@ -170,6 +170,11 @@ curl -H "Authorization: Key $FAL_API_KEY" "https://fal.run/fal-ai/flux/schnell" 
 # Проверить OpenRouter
 curl -H "Authorization: Bearer $OPENROUTER_API_KEY" \
      "https://openrouter.ai/api/v1/models"
+
+# Проверить Google Gemini (если настроен)
+curl -H "Content-Type: application/json" \
+     -d '{"contents":[{"parts":[{"text":"test"}]}]}' \
+     "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GOOGLE_GEMINI_API_KEY"
 ```
 
 ## 📞 Поддержка

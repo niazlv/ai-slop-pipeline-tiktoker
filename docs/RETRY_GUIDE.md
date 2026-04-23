@@ -246,6 +246,7 @@ If all 3 attempts fail for a video, possible causes:
 ```env
 FAL_API_KEY="sk-..."  # Should start with "sk-"
 OPENROUTER_API_KEY="sk-..."
+GOOGLE_GEMINI_API_KEY="your_key_here"  # Optional but recommended for reliability
 ```
 
 **Solutions:**

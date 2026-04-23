@@ -26,6 +26,25 @@ OPENROUTER_API_KEY="your_openrouter_api_key"
 # Text Generation Models
 OPENROUTER_MODEL="openai/chatgpt"
 OPENROUTER_MODEL_FREE="x-ai/grok-4.1-fast:free"
+
+# ============================================
+# GOOGLE GEMINI SETTINGS
+# ============================================
+
+GOOGLE_GEMINI_API_KEY="your_google_gemini_api_key"
+
+# ============================================
+# FALLBACK MODEL CONFIGURATION
+# ============================================
+
+# Primary models for story generation (comma-separated)
+FALLBACK_STORY_PRIMARY="openai/gpt-4,google/gemini-pro"
+
+# Fallback models for story generation (comma-separated)
+FALLBACK_STORY_FALLBACK="x-ai/grok-4.1-fast,anthropic/claude-3-haiku"
+
+# Maximum retry attempts for fallback mechanisms
+FALLBACK_MAX_RETRIES="3"
 ```
 
 ## Environment Variables
@@ -91,6 +110,110 @@ OPENROUTER_MODEL_FREE="x-ai/grok-4.1-fast:free"
 - **Options:**
   - `x-ai/grok-4.1-fast:free` - Completely free
   - `google/gemini-2.0-flash:free` - Also free
+
+### Google Gemini Configuration
+
+#### GOOGLE_GEMINI_API_KEY
+- **Required:** No (but recommended for better reliability)
+- **Description:** Direct API key for Google Gemini models
+- **Get it:** https://aistudio.google.com/app/apikey
+- **Purpose:** Enables direct access to Gemini models, bypassing OpenRouter limitations
+- **Benefits:**
+  - More reliable access to Gemini models
+  - Better error handling and logging
+  - Automatic fallback when OpenRouter Gemini models fail
+
+### Fallback Model Configuration
+
+The system includes intelligent fallback mechanisms that automatically switch to alternative models when the primary model fails. These settings allow you to customize the fallback behavior:
+
+#### FALLBACK_STORY_PRIMARY
+- **Required:** No
+- **Default:** `openai/gpt-4,openai/gpt-4-turbo,google/gemini-pro,google/gemini-1.5-pro`
+- **Description:** Primary models for story generation (comma-separated)
+- **Purpose:** These models are tried first for text generation
+
+#### FALLBACK_STORY_FALLBACK
+- **Required:** No
+- **Default:** `x-ai/grok-4.1-fast,anthropic/claude-3-haiku,meta-llama/llama-3.1-8b-instruct,mistralai/mistral-7b-instruct`
+- **Description:** Fallback models for story generation (comma-separated)
+- **Purpose:** Used when primary models fail
+
+#### FALLBACK_PROMPTS_PRIMARY
+- **Required:** No
+- **Default:** `openai/gpt-4,google/gemini-pro,anthropic/claude-3-sonnet`
+- **Description:** Primary models for video prompt generation (comma-separated)
+
+#### FALLBACK_PROMPTS_FALLBACK
+- **Required:** No
+- **Default:** `x-ai/grok-4.1-fast,anthropic/claude-3-haiku,meta-llama/llama-3.1-8b-instruct`
+- **Description:** Fallback models for video prompt generation (comma-separated)
+
+#### FALLBACK_MAX_RETRIES
+- **Required:** No
+- **Default:** `3`
+- **Description:** Maximum retry attempts for fallback mechanisms
+- **Range:** 1-5 (recommended: 2-3)
+
+## Fallback System & Reliability
+
+### How Fallback Works
+
+The system includes intelligent fallback mechanisms that automatically switch to alternative models when the primary model fails. This ensures reliable text generation even when specific models are unavailable.
+
+**Fallback Sequence:**
+1. **Primary Model** - Your configured `OPENROUTER_MODEL` or `OPENROUTER_MODEL_FREE`
+2. **Primary Fallbacks** - Models from `FALLBACK_STORY_PRIMARY` list
+3. **Secondary Fallbacks** - Models from `FALLBACK_STORY_FALLBACK` list
+
+**Example Fallback Flow:**
+```
+openai/gpt-4 (fails) → google/gemini-pro (fails) → x-ai/grok-4.1-fast (succeeds) ✅
+```
+
+### Google Gemini Direct API
+
+When you configure `GOOGLE_GEMINI_API_KEY`, the system can bypass OpenRouter limitations and connect directly to Google's Gemini API:
+
+**Benefits:**
+- **Higher Reliability** - Direct API access is more stable than OpenRouter proxy
+- **Better Error Handling** - Detailed error messages and logging
+- **Automatic Detection** - System automatically uses direct API for Gemini models
+- **Seamless Fallback** - Falls back to OpenRouter if direct API fails
+
+**Supported Models:**
+- `google/gemini-pro`
+- `google/gemini-1.5-pro`
+- `gemini-pro` (shorthand)
+
+### Configuring Fallback Models
+
+You can customize which models are used as fallbacks:
+
+```env
+# High-quality primary models (more expensive but better results)
+FALLBACK_STORY_PRIMARY="openai/gpt-4,google/gemini-1.5-pro,anthropic/claude-3-sonnet"
+
+# Cost-effective fallback models (cheaper, still good quality)
+FALLBACK_STORY_FALLBACK="x-ai/grok-4.1-fast,anthropic/claude-3-haiku,meta-llama/llama-3.1-8b-instruct"
+
+# Reduce retry attempts for faster failure detection
+FALLBACK_MAX_RETRIES="2"
+```
+
+### Troubleshooting Fallbacks
+
+**Check Fallback Activity:**
+The system logs all fallback attempts. Look for messages like:
+```
+🔄 Fallback successful: switched from openai/gpt-4 to x-ai/grok-4.1-fast (attempt 2)
+```
+
+**Common Scenarios:**
+- **OpenRouter Rate Limits** - System falls back to alternative models
+- **Model Unavailability** - Specific models may be temporarily unavailable
+- **API Key Issues** - Invalid keys trigger fallback to working models
+- **Content Policy** - Blocked prompts may work with different models
 
 ## Switching Between Modes
 
@@ -269,6 +392,7 @@ Check that `.env` file exists and contains:
 ```env
 FAL_API_KEY="sk-..."
 OPENROUTER_API_KEY="sk-..."
+GOOGLE_GEMINI_API_KEY="your_key_here"  # Optional but recommended
 ```
 
 ### "Insufficient quota"
@@ -280,6 +404,18 @@ OPENROUTER_API_KEY="sk-..."
 - Verify model ID in `.env` matches FAL.AI/OpenRouter documentation
 - Check for typos in model names
 - Try default models first
+- For Gemini models, ensure `GOOGLE_GEMINI_API_KEY` is set for direct API access
+
+### "Fallback system not working"
+- Check fallback configuration in `.env`:
+```env
+FALLBACK_STORY_PRIMARY="openai/gpt-4,google/gemini-pro"
+FALLBACK_STORY_FALLBACK="x-ai/grok-4.1-fast,anthropic/claude-3-haiku"
+FALLBACK_MAX_RETRIES="3"
+```
+- Verify model names are correct and available
+- Check logs for fallback attempt messages
+- Ensure at least one fallback model is accessible
 
 ### "Rate limit exceeded"
 - Wait a few minutes

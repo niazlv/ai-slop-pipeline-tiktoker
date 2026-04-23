@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ReferenceImage } from '../types/video-step';
+import { logger } from '../bot/logger';
 
 export interface PromptMapping {
   prompt: string;
@@ -12,21 +14,388 @@ export interface TextGenerationResult {
   variant: number;
 }
 
+export interface FallbackConfig {
+  requestType: 'story' | 'prompts' | 'regenerate' | 'modify';
+  primaryModels: string[];
+  fallbackModels: string[];
+  maxRetries: number;
+}
+
+export interface ProviderConfig {
+  name: string;
+  type: 'openrouter' | 'gemini';
+  models: string[];
+  priority: number;
+}
+
 export class TextGeneratorClient {
-  private client: OpenAI;
+  private openRouterClient: OpenAI;
+  private geminiClient: GoogleGenerativeAI | null;
   private model: string;
+  private fallbackConfigs: Map<string, FallbackConfig> = new Map();
+  private providers: ProviderConfig[] = [];
 
   constructor(useFreeModel: boolean = false) {
-    this.client = new OpenAI({
+    // Initialize OpenRouter client
+    this.openRouterClient = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
       apiKey: process.env.OPENROUTER_API_KEY,
     });
+
+    // Initialize Gemini client if API key is available
+    this.geminiClient = process.env.GOOGLE_GEMINI_API_KEY 
+      ? new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
+      : null;
 
     this.model = useFreeModel
       ? (process.env.OPENROUTER_MODEL_FREE || 'x-ai/grok-4.1-fast:free')
       : (process.env.OPENROUTER_MODEL || 'openai/chagpt');
 
+    // Initialize fallback configurations
+    this.initializeFallbackConfigs();
+    
+    // Initialize provider configurations
+    this.initializeProviders();
+
     console.log(`📝 Using text model: ${this.model}${useFreeModel ? ' (FREE)' : ''}`);
+  }
+
+  private isGeminiModel(model: string): boolean {
+    return model.includes('gemini') || model.startsWith('google/');
+  }
+
+  private initializeFallbackConfigs(): void {
+    this.fallbackConfigs = new Map();
+
+    // Parse environment variables for fallback configuration
+    const parseModelList = (envVar: string, defaultValue: string[]): string[] => {
+      const envValue = process.env[envVar];
+      if (envValue) {
+        return envValue.split(',').map(model => model.trim()).filter(model => model.length > 0);
+      }
+      return defaultValue;
+    };
+
+    const maxRetries = parseInt(process.env.FALLBACK_MAX_RETRIES || '6', 10);
+
+    // Story generation fallback configuration
+    // IMPORTANT: x-ai/grok-4.1-fast is the primary working model - always first
+    this.fallbackConfigs.set('story', {
+      requestType: 'story',
+      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
+        // Working OpenRouter models first (these actually work)
+        'x-ai/grok-4.1-fast',
+        // Direct Gemini API - use correct model name
+        'gemini-pro',
+        // Additional OpenRouter fallbacks
+        'anthropic/claude-3-haiku',
+      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
+        'meta-llama/llama-3.1-8b-instruct',
+        'mistralai/mistral-7b-instruct'
+      ]),
+      maxRetries: maxRetries
+    });
+
+    // Video prompts generation fallback configuration
+    this.fallbackConfigs.set('prompts', {
+      requestType: 'prompts',
+      primaryModels: parseModelList('FALLBACK_PROMPTS_PRIMARY', [
+        'x-ai/grok-4.1-fast',
+        'gemini-pro',
+        'anthropic/claude-3-haiku',
+      ]),
+      fallbackModels: parseModelList('FALLBACK_PROMPTS_FALLBACK', [
+        'meta-llama/llama-3.1-8b-instruct',
+        'mistralai/mistral-7b-instruct'
+      ]),
+      maxRetries: maxRetries
+    });
+
+    // Single variant regeneration fallback configuration
+    this.fallbackConfigs.set('regenerate', {
+      requestType: 'regenerate',
+      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
+        'x-ai/grok-4.1-fast',
+        'gemini-pro',
+        'anthropic/claude-3-haiku',
+      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
+        'meta-llama/llama-3.1-8b-instruct',
+      ]),
+      maxRetries: maxRetries
+    });
+
+    // Variant modification fallback configuration
+    this.fallbackConfigs.set('modify', {
+      requestType: 'modify',
+      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
+        'x-ai/grok-4.1-fast',
+        'gemini-pro',
+        'anthropic/claude-3-haiku',
+      ]),
+      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
+        'meta-llama/llama-3.1-8b-instruct',
+      ]),
+      maxRetries: maxRetries
+    });
+
+    // Log fallback configuration for debugging
+    console.log('🔄 Fallback configuration loaded:');
+    console.log(`   Max retries: ${maxRetries}`);
+    console.log(`   Story primary: ${this.fallbackConfigs.get('story')?.primaryModels.join(', ')}`);
+    console.log(`   Story fallback: ${this.fallbackConfigs.get('story')?.fallbackModels.join(', ')}`);
+  }
+
+  private initializeProviders(): void {
+    this.providers = [
+      {
+        name: 'Google Gemini',
+        type: 'gemini',
+        models: ['gemini-pro', 'gemini-1.5-pro'], // Remove incorrect model names
+        priority: 1
+      },
+      {
+        name: 'OpenRouter',
+        type: 'openrouter',
+        models: [
+          'openai/gpt-4',
+          'openai/gpt-4-turbo',
+          'openai/gpt-3.5-turbo',
+          'x-ai/grok-4.1-fast',
+          'anthropic/claude-3-sonnet',
+          'anthropic/claude-3-haiku',
+          'meta-llama/llama-3.1-8b-instruct',
+          'mistralai/mistral-7b-instruct'
+        ],
+        priority: 2
+      }
+    ];
+  }
+
+  private getProviderForModel(model: string): ProviderConfig | null {
+    return this.providers.find(provider => 
+      provider.models.some(m => model.includes(m) || m.includes(model))
+    ) || null;
+  }
+
+  private async generateWithFallback(
+    requestType: 'story' | 'prompts' | 'regenerate' | 'modify',
+    generateFn: (model: string) => Promise<string>,
+    originalModel?: string
+  ): Promise<string> {
+    const config = this.fallbackConfigs.get(requestType);
+    if (!config) {
+      throw new Error(`No fallback configuration found for request type: ${requestType}`);
+    }
+
+    const modelToUse = originalModel || this.model;
+    const allModels = [modelToUse, ...config.primaryModels, ...config.fallbackModels];
+    
+    // Remove duplicates while preserving order
+    const uniqueModels = Array.from(new Set(allModels));
+    
+    let lastError: Error | null = null;
+    let attemptCount = 0;
+
+    for (const model of uniqueModels) {
+      if (attemptCount >= config.maxRetries + 1) {
+        break;
+      }
+
+      attemptCount++;
+      const provider = this.getProviderForModel(model);
+      
+      const requestContext = {
+        requestType,
+        attempt: attemptCount,
+        model,
+        provider: provider?.name || 'unknown',
+        providerType: provider?.type || 'unknown',
+        timestamp: new Date().toISOString(),
+        totalModelsAvailable: uniqueModels.length
+      };
+
+      logger.info(`Attempting text generation with fallback`, requestContext);
+
+      try {
+        const result = await generateFn(model);
+        
+        logger.info(`Text generation successful with fallback`, {
+          ...requestContext,
+          success: true,
+          resultLength: result.length,
+          fallbackUsed: attemptCount > 1
+        });
+
+        if (attemptCount > 1) {
+          console.log(`🔄 Fallback successful: switched from ${modelToUse} to ${model} (attempt ${attemptCount})`);
+        }
+
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        
+        const errorDetails = {
+          ...requestContext,
+          error: {
+            message: error.message || 'Unknown error',
+            name: error.name || 'UnknownError',
+            code: error.code || 'UNKNOWN_CODE',
+            status: error.status || error.statusCode || 'UNKNOWN_STATUS'
+          },
+          success: false
+        };
+
+        logger.error(`Text generation failed, trying fallback`, errorDetails);
+        console.log(`❌ Model ${model} failed (attempt ${attemptCount}/${config.maxRetries + 1}): ${error.message}`);
+        
+        // Continue to next model
+        continue;
+      }
+    }
+
+    // All models failed
+    const finalError = new Error(
+      `All fallback models failed for ${requestType}. Last error: ${lastError?.message || 'Unknown error'}`
+    ) as Error & { cause?: any };
+    finalError.cause = lastError;
+
+    logger.error(`All fallback models exhausted for ${requestType}`, {
+      requestType,
+      totalAttempts: attemptCount,
+      modelsAttempted: uniqueModels.slice(0, attemptCount),
+      finalError: finalError.message,
+      timestamp: new Date().toISOString()
+    });
+
+    throw finalError;
+  }
+
+  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName: string = 'gemini-pro'): Promise<string> {
+    if (!this.geminiClient) {
+      const error = new Error('Google Gemini API key not configured');
+      logger.error('Gemini API initialization failed', {
+        model: modelName,
+        provider: 'google-gemini',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+        context: 'API_KEY_MISSING'
+      });
+      throw error;
+    }
+
+    const requestContext = {
+      model: modelName,
+      provider: 'google-gemini',
+      temperature,
+      maxOutputTokens: 800,
+      promptLength: prompt.length,
+      systemPromptLength: systemPrompt.length,
+      timestamp: new Date().toISOString()
+    };
+
+    logger.info('Starting Gemini API request', requestContext);
+
+    try {
+      const model = this.geminiClient.getGenerativeModel({ 
+        model: modelName,
+        generationConfig: {
+          temperature: temperature,
+          maxOutputTokens: 800,
+        }
+      });
+
+      const fullPrompt = `${systemPrompt}\n\nUser request: ${prompt}`;
+      const result = await model.generateContent(fullPrompt);
+      const response = await result.response;
+      const generatedText = response.text();
+
+      logger.info('Gemini API request successful', {
+        ...requestContext,
+        responseLength: generatedText.length,
+        success: true
+      });
+
+      return generatedText;
+    } catch (error: any) {
+      const errorDetails = {
+        ...requestContext,
+        error: {
+          message: error.message || 'Unknown error',
+          name: error.name || 'UnknownError',
+          code: error.code || 'UNKNOWN_CODE',
+          status: error.status || error.statusCode || 'UNKNOWN_STATUS',
+          stack: error.stack,
+          details: error.details || error.response?.data || null
+        },
+        success: false
+      };
+
+      logger.error('Gemini API request failed', errorDetails);
+      
+      // Re-throw with enhanced context
+      const enhancedError = new Error(`Gemini API failed: ${error.message}`) as Error & { cause?: any };
+      enhancedError.cause = error;
+      throw enhancedError;
+    }
+  }
+
+  private async generateWithOpenRouter(messages: any[], temperature: number = 0.9, maxTokens: number = 800, model?: string): Promise<string> {
+    const modelToUse = model || this.model;
+    const requestContext = {
+      model: modelToUse,
+      provider: 'openrouter',
+      temperature,
+      maxTokens,
+      messageCount: messages.length,
+      timestamp: new Date().toISOString()
+    };
+
+    logger.info('Starting OpenRouter API request', requestContext);
+
+    try {
+      const response = await this.openRouterClient.chat.completions.create({
+        model: modelToUse,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      });
+
+      const generatedText = response.choices[0]?.message?.content?.trim() || '';
+
+      logger.info('OpenRouter API request successful', {
+        ...requestContext,
+        responseLength: generatedText.length,
+        choicesCount: response.choices?.length || 0,
+        finishReason: response.choices[0]?.finish_reason,
+        usage: response.usage,
+        success: true
+      });
+
+      return generatedText;
+    } catch (error: any) {
+      const errorDetails = {
+        ...requestContext,
+        error: {
+          message: error.message || 'Unknown error',
+          name: error.name || 'UnknownError',
+          code: error.code || 'UNKNOWN_CODE',
+          status: error.status || error.statusCode || 'UNKNOWN_STATUS',
+          type: error.type || 'unknown_error_type',
+          stack: error.stack,
+          details: error.error || error.response?.data || null
+        },
+        success: false
+      };
+
+      logger.error('OpenRouter API request failed', errorDetails);
+      
+      // Re-throw with enhanced context
+      const enhancedError = new Error(`OpenRouter API failed: ${error.message}`) as Error & { cause?: any };
+      enhancedError.cause = error;
+      throw enhancedError;
+    }
   }
 
   private detectLanguage(text: string): 'ru' | 'en' {
@@ -73,29 +442,63 @@ REQUIREMENTS:
 RESPONSE FORMAT:
 Return only the clean story text, without additional explanations or markup.`;
 
-    console.log('\n🚀 PARALLEL generation of 3 variants...');
+    console.log('\n🚀 PARALLEL generation of 3 variants with fallback support...');
 
-    // Generate all variants in parallel
+    // Generate all variants in parallel with fallback support
     const variantPromises = [0, 1, 2].map(async (i) => {
       const variantStart = Date.now();
       console.log(`🔄 Starting variant ${i + 1}/3 generation...`);
 
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: description }],
-        temperature: 0.9 + i * 0.1, // Разная температура для большего разнообразия
-        max_tokens: 800,
-      });
+      const temperature = 0.9 + i * 0.1; // Different temperature for more variety
 
-      const text = response.choices[0]?.message?.content?.trim() || '';
-      const variantTime = ((Date.now() - variantStart) / 1000).toFixed(1);
+      try {
+        const text = await this.generateWithFallback(
+          'story',
+          async (model: string) => {
+            if (this.isGeminiModel(model)) {
+              // Use direct Gemini API with correct model name
+              const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
+              return await this.generateWithGemini(description, systemPrompt, temperature, geminiModel);
+            } else {
+              // Use OpenRouter
+              return await this.generateWithOpenRouter([
+                { role: 'system', content: systemPrompt }, 
+                { role: 'user', content: description }
+              ], temperature, 800, model);
+            }
+          }
+        );
 
-      console.log(`✅ Variant ${i + 1} generated (${text.length} characters) - ${variantTime}s`);
+        const variantTime = ((Date.now() - variantStart) / 1000).toFixed(1);
+        console.log(`✅ Variant ${i + 1} generated (${text.length} characters) - ${variantTime}s`);
 
-      return {
-        text,
-        variant: i + 1,
-      };
+        return {
+          text,
+          variant: i + 1,
+        };
+      } catch (error: any) {
+        const errorContext = {
+          method: 'generateStoryVariants',
+          variant: i + 1,
+          temperature,
+          descriptionLength: description.length,
+          duration,
+          timestamp: new Date().toISOString(),
+          error: {
+            message: error.message || 'Unknown error',
+            name: error.name || 'UnknownError',
+            cause: error.cause || null
+          }
+        };
+
+        logger.error(`Story variant ${i + 1} generation failed after all fallbacks`, errorContext);
+        console.error(`❌ Error generating variant ${i + 1} (all fallbacks exhausted):`, error);
+        
+        return {
+          text: '',
+          variant: i + 1,
+        };
+      }
     });
 
     const variants = await Promise.all(variantPromises);
@@ -158,38 +561,67 @@ Return only a JSON array of EXACTLY ${segmentCount} objects:
   }
 ]`;
 
-    console.log('\n🔄 Generating prompts...');
+    console.log('\n🔄 Generating prompts with fallback support...');
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Story text:\n\n${storyText}` },
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
-    });
+    try {
+      const content = await this.generateWithFallback(
+        'prompts',
+        async (model: string) => {
+          if (this.isGeminiModel(model)) {
+            // Use direct Gemini API with correct model name
+            const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
+            return await this.generateWithGemini(`Story text:\n\n${storyText}`, systemPrompt, 0.7, geminiModel);
+          } else {
+            // Use OpenRouter
+            return await this.generateWithOpenRouter([
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `Story text:\n\n${storyText}` },
+            ], 0.7, 2000, model);
+          }
+        }
+      );
 
-    const content = response.choices[0]?.message?.content?.trim() || '[]';
+      // Extract JSON from response (may be in markdown block)
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      const jsonString = jsonMatch ? jsonMatch[0] : content;
 
-    // Extract JSON from response (may be in markdown block)
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    const jsonString = jsonMatch ? jsonMatch[0] : content;
+      const prompts: PromptMapping[] = JSON.parse(jsonString);
 
-    const prompts: PromptMapping[] = JSON.parse(jsonString);
+      const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`\n✅ Generated prompts: ${prompts.length} - ${totalTime}s`);
+      prompts.forEach((p, i) => {
+        console.log(`\n  ${i + 1}. ${p.prompt.substring(0, 80)}...`);
+        if (p.referenceImageIndex !== null && p.referenceImageIndex !== undefined) {
+          console.log(`     🖼️  Mapped reference #${p.referenceImageIndex} [${p.referenceAction}]`);
+        }
+      });
+      console.log('='.repeat(60) + '\n');
 
-    console.log(`\n✅ Generated prompts: ${prompts.length} - ${totalTime}s`);
-    prompts.forEach((p, i) => {
-      console.log(`\n  ${i + 1}. ${p.prompt.substring(0, 80)}...`);
-      if (p.referenceImageIndex !== null && p.referenceImageIndex !== undefined) {
-        console.log(`     🖼️  Mapped reference #${p.referenceImageIndex} [${p.referenceAction}]`);
-      }
-    });
-    console.log('='.repeat(60) + '\n');
+      return prompts;
+    } catch (error: any) {
+      const errorContext = {
+        method: 'generateVideoPrompts',
+        temperature: 0.7,
+        maxTokens: 2000,
+        storyTextLength: storyText.length,
+        duration,
+        segmentCount,
+        referenceImagesCount: referenceImages.length,
+        timestamp: new Date().toISOString(),
+        error: {
+          message: error.message || 'Unknown error',
+          name: error.name || 'UnknownError',
+          cause: error.cause || null
+        }
+      };
 
-    return prompts;
+      logger.error('Video prompts generation failed after all fallbacks', errorContext);
+      console.error('❌ Error generating video prompts (all fallbacks exhausted):', error);
+      
+      // Return empty array as fallback
+      return [];
+    }
   }
 
   async regenerateSingleVariant(description: string, duration: number, temperature: number = 0.9): Promise<string> {
@@ -213,14 +645,41 @@ REQUIREMENTS:
 RESPONSE FORMAT:
 Return only the clean story text, without additional explanations or markup.`;
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: description }],
-      temperature,
-      max_tokens: 800,
-    });
+    try {
+      return await this.generateWithFallback(
+        'regenerate',
+        async (model: string) => {
+          if (this.isGeminiModel(model)) {
+            // Use direct Gemini API with correct model name
+            const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
+            return await this.generateWithGemini(description, systemPrompt, temperature, geminiModel);
+          } else {
+            // Use OpenRouter
+            return await this.generateWithOpenRouter([
+              { role: 'system', content: systemPrompt }, 
+              { role: 'user', content: description }
+            ], temperature, 800, model);
+          }
+        }
+      );
+    } catch (error: any) {
+      const errorContext = {
+        method: 'regenerateSingleVariant',
+        temperature,
+        descriptionLength: description.length,
+        duration,
+        timestamp: new Date().toISOString(),
+        error: {
+          message: error.message || 'Unknown error',
+          name: error.name || 'UnknownError',
+          cause: error.cause || null
+        }
+      };
 
-    return response.choices[0]?.message?.content?.trim() || '';
+      logger.error('Single variant regeneration failed after all fallbacks', errorContext);
+      console.error('❌ Error regenerating variant (all fallbacks exhausted):', error);
+      return '';
+    }
   }
 
   async modifyVariant(originalText: string, modificationPrompt: string, duration: number): Promise<string> {
@@ -244,16 +703,46 @@ REQUIREMENTS:
 RESPONSE FORMAT:
 Return only the modified story text, without additional explanations or markup.`;
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Original story:\n${originalText}\n\nModification request: ${modificationPrompt}` },
-      ],
-      temperature: 0.7,
-      max_tokens: 800,
-    });
+    try {
+      return await this.generateWithFallback(
+        'modify',
+        async (model: string) => {
+          if (this.isGeminiModel(model)) {
+            // Use direct Gemini API with correct model name
+            const geminiModel = model.includes('google/') ? model.replace('google/', '') : model;
+            return await this.generateWithGemini(
+              `Original story:\n${originalText}\n\nModification request: ${modificationPrompt}`, 
+              systemPrompt, 
+              0.7,
+              geminiModel
+            );
+          } else {
+            // Use OpenRouter
+            return await this.generateWithOpenRouter([
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `Original story:\n${originalText}\n\nModification request: ${modificationPrompt}` },
+            ], 0.7, 800, model);
+          }
+        }
+      );
+    } catch (error: any) {
+      const errorContext = {
+        method: 'modifyVariant',
+        temperature: 0.7,
+        originalTextLength: originalText.length,
+        modificationPromptLength: modificationPrompt.length,
+        duration,
+        timestamp: new Date().toISOString(),
+        error: {
+          message: error.message || 'Unknown error',
+          name: error.name || 'UnknownError',
+          cause: error.cause || null
+        }
+      };
 
-    return response.choices[0]?.message?.content?.trim() || '';
+      logger.error('Variant modification failed after all fallbacks', errorContext);
+      console.error('❌ Error modifying variant (all fallbacks exhausted):', error);
+      return '';
+    }
   }
 }

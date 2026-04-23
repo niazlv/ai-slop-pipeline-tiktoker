@@ -14,6 +14,7 @@ Before you begin, ensure you have:
 - **API Keys**:
   - [FAL.AI API Key](https://fal.ai/dashboard)
   - [OpenRouter API Key](https://openrouter.ai/keys)
+  - [Google Gemini API Key](https://aistudio.google.com/app/apikey) (optional, for better reliability)
 
 ### Install Dependencies
 
@@ -200,6 +201,7 @@ Ensure your `.env` file has valid keys:
 ```env
 FAL_API_KEY="your_fal_key"
 OPENROUTER_API_KEY="your_openrouter_key"
+GOOGLE_GEMINI_API_KEY="your_gemini_key"  # Optional but recommended
 ```
 
 ## System Requirements

@@ -133,6 +133,7 @@ output/session_2025-01-23T12-30-45/
 ```env
 FAL_API_KEY="ваш_ключ_от_fal"
 OPENROUTER_API_KEY="ваш_ключ_от_openrouter"
+GOOGLE_GEMINI_API_KEY="ваш_ключ_от_gemini"  # Опционально, но рекомендуется
 ```
 
 ## Требования

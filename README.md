@@ -206,6 +206,7 @@ The easiest way to use TikToker is through our Telegram bot:
 - API Keys:
   - [FAL.AI](https://fal.ai/dashboard) - For video/image generation
   - [OpenRouter](https://openrouter.ai/keys) - For text generation
+  - [Google Gemini](https://aistudio.google.com/app/apikey) - Optional, for better reliability with Gemini models
 
 #### CLI Installation
 
@@ -244,6 +245,9 @@ OPENROUTER_API_KEY="your_openrouter_api_key"
 # Text Models
 OPENROUTER_MODEL="openai/chatgpt"
 OPENROUTER_MODEL_FREE="x-ai/grok-4.1-fast:free"
+
+# Google Gemini Settings (optional, for better reliability)
+GOOGLE_GEMINI_API_KEY="your_google_gemini_api_key"
 
 # Language (en - English, ru - Russian)
 LANGUAGE="en"
