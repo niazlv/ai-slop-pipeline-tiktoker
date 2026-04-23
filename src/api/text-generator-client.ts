@@ -67,89 +67,51 @@ export class TextGeneratorClient {
   private initializeFallbackConfigs(): void {
     this.fallbackConfigs = new Map();
 
-    // Parse environment variables for fallback configuration
     const parseModelList = (envVar: string, defaultValue: string[]): string[] => {
       const envValue = process.env[envVar];
-      if (envValue) {
-        return envValue.split(',').map(model => model.trim()).filter(model => model.length > 0);
+      if (envValue && envValue.trim()) {
+        return envValue.split(',').map(m => m.trim()).filter(m => m.length > 0);
       }
       return defaultValue;
     };
 
     const maxRetries = parseInt(process.env.FALLBACK_MAX_RETRIES || '6', 10);
+    const geminiModel = process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+    const openrouterModel = process.env.OPENROUTER_MODEL || 'x-ai/grok-4.1-fast';
 
-    // Story generation fallback configuration
-    // IMPORTANT: x-ai/grok-4.1-fast is the primary working model - always first
-    this.fallbackConfigs.set('story', {
-      requestType: 'story',
-      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
-        'x-ai/grok-4.1-fast',
-        'gemini-2.5-flash',
-      ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
-      maxRetries: maxRetries
-    });
+    const defaultPrimary = [openrouterModel, geminiModel];
 
-    // Video prompts generation fallback configuration
-    this.fallbackConfigs.set('prompts', {
-      requestType: 'prompts',
-      primaryModels: parseModelList('FALLBACK_PROMPTS_PRIMARY', [
-        'x-ai/grok-4.1-fast',
-        'gemini-2.5-flash',
-      ]),
-      fallbackModels: parseModelList('FALLBACK_PROMPTS_FALLBACK', []),
-      maxRetries: maxRetries
-    });
+    const storyPrimary   = parseModelList('FALLBACK_STORY_PRIMARY',   defaultPrimary);
+    const storyFallback  = parseModelList('FALLBACK_STORY_FALLBACK',  []);
+    const promptsPrimary = parseModelList('FALLBACK_PROMPTS_PRIMARY',  defaultPrimary);
+    const promptsFallback= parseModelList('FALLBACK_PROMPTS_FALLBACK', []);
 
-    // Single variant regeneration fallback configuration
-    this.fallbackConfigs.set('regenerate', {
-      requestType: 'regenerate',
-      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
-        'x-ai/grok-4.1-fast',
-        'gemini-2.5-flash',
-      ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
-      maxRetries: maxRetries
-    });
+    this.fallbackConfigs.set('story',      { requestType: 'story',      primaryModels: storyPrimary,   fallbackModels: storyFallback,   maxRetries });
+    this.fallbackConfigs.set('prompts',    { requestType: 'prompts',    primaryModels: promptsPrimary, fallbackModels: promptsFallback, maxRetries });
+    this.fallbackConfigs.set('regenerate', { requestType: 'regenerate', primaryModels: storyPrimary,   fallbackModels: storyFallback,   maxRetries });
+    this.fallbackConfigs.set('modify',     { requestType: 'modify',     primaryModels: storyPrimary,   fallbackModels: storyFallback,   maxRetries });
 
-    // Variant modification fallback configuration
-    this.fallbackConfigs.set('modify', {
-      requestType: 'modify',
-      primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
-        'x-ai/grok-4.1-fast',
-        'gemini-2.5-flash',
-      ]),
-      fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', []),
-      maxRetries: maxRetries
-    });
-
-    // Log fallback configuration for debugging
     console.log('🔄 Fallback configuration loaded:');
     console.log(`   Max retries: ${maxRetries}`);
-    console.log(`   Story primary: ${this.fallbackConfigs.get('story')?.primaryModels.join(', ')}`);
-    console.log(`   Story fallback: ${this.fallbackConfigs.get('story')?.fallbackModels.join(', ')}`);
+    console.log(`   Story primary: ${storyPrimary.join(', ')}`);
+    console.log(`   Story fallback: ${storyFallback.join(', ') || '(none)'}`);
   }
 
   private initializeProviders(): void {
+    const geminiModel = process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
     this.providers = [
       {
         name: 'Google Gemini',
         type: 'gemini',
-        models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-pro'],
+        models: [geminiModel, 'gemini'],
         priority: 1
       },
       {
         name: 'OpenRouter',
         type: 'openrouter',
         models: [
-          'openai/gpt-4',
-          'openai/gpt-4-turbo',
-          'openai/gpt-3.5-turbo',
-          'x-ai/grok-4.1-fast',
-          'anthropic/claude-3-sonnet',
-          'anthropic/claude-3-haiku',
-          'meta-llama/llama-3.1-8b-instruct',
-          'mistralai/mistral-7b-instruct'
+          'openai/', 'x-ai/', 'anthropic/', 'meta-llama/', 'mistralai/',
+          'google/', 'cohere/', 'perplexity/', 'deepseek/'
         ],
         priority: 2
       }
@@ -157,9 +119,12 @@ export class TextGeneratorClient {
   }
 
   private getProviderForModel(model: string): ProviderConfig | null {
-    return this.providers.find(provider => 
-      provider.models.some(m => model.includes(m) || m.includes(model))
-    ) || null;
+    // Gemini models: contain 'gemini' or start with 'google/'
+    if (this.isGeminiModel(model)) {
+      return this.providers.find(p => p.type === 'gemini') || null;
+    }
+    // Everything else goes through OpenRouter
+    return this.providers.find(p => p.type === 'openrouter') || null;
   }
 
   private async generateWithFallback(
@@ -255,11 +220,12 @@ export class TextGeneratorClient {
     throw finalError;
   }
 
-  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName: string = 'gemini-2.5-flash'): Promise<string> {
+  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName?: string): Promise<string> {
+    const resolvedModel = modelName || process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
     if (!this.geminiClient) {
       const error = new Error('Google Gemini API key not configured');
       logger.error('Gemini API initialization failed', {
-        model: modelName,
+        model: resolvedModel,
         provider: 'google-gemini',
         error: error.message,
         timestamp: new Date().toISOString(),
@@ -269,7 +235,7 @@ export class TextGeneratorClient {
     }
 
     const requestContext = {
-      model: modelName,
+      model: resolvedModel,
       provider: 'google-gemini',
       temperature,
       maxOutputTokens: 800,
@@ -282,7 +248,7 @@ export class TextGeneratorClient {
 
     try {
       const model = this.geminiClient.getGenerativeModel({ 
-        model: modelName,
+        model: resolvedModel,
         generationConfig: {
           temperature: temperature,
           maxOutputTokens: 800,
