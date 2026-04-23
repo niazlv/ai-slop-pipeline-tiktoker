@@ -85,14 +85,14 @@ export class TextGeneratorClient {
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
         // Working OpenRouter models first (these actually work)
         'x-ai/grok-4.1-fast',
-        // Direct Gemini API - use correct model name
-        'gemini-pro',
+        // Direct Gemini API - gemini-2.5-flash is current stable model
+        'gemini-2.5-flash',
         // Additional OpenRouter fallbacks
         'anthropic/claude-3-haiku',
       ]),
       fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct',
-        'mistralai/mistral-7b-instruct'
+        'meta-llama/llama-3.1-8b-instruct:free',
+        'mistralai/mistral-7b-instruct:free'
       ]),
       maxRetries: maxRetries
     });
@@ -102,12 +102,12 @@ export class TextGeneratorClient {
       requestType: 'prompts',
       primaryModels: parseModelList('FALLBACK_PROMPTS_PRIMARY', [
         'x-ai/grok-4.1-fast',
-        'gemini-pro',
+        'gemini-2.5-flash',
         'anthropic/claude-3-haiku',
       ]),
       fallbackModels: parseModelList('FALLBACK_PROMPTS_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct',
-        'mistralai/mistral-7b-instruct'
+        'meta-llama/llama-3.1-8b-instruct:free',
+        'mistralai/mistral-7b-instruct:free'
       ]),
       maxRetries: maxRetries
     });
@@ -117,11 +117,11 @@ export class TextGeneratorClient {
       requestType: 'regenerate',
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
         'x-ai/grok-4.1-fast',
-        'gemini-pro',
+        'gemini-2.5-flash',
         'anthropic/claude-3-haiku',
       ]),
       fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct',
+        'meta-llama/llama-3.1-8b-instruct:free',
       ]),
       maxRetries: maxRetries
     });
@@ -131,11 +131,11 @@ export class TextGeneratorClient {
       requestType: 'modify',
       primaryModels: parseModelList('FALLBACK_STORY_PRIMARY', [
         'x-ai/grok-4.1-fast',
-        'gemini-pro',
+        'gemini-2.5-flash',
         'anthropic/claude-3-haiku',
       ]),
       fallbackModels: parseModelList('FALLBACK_STORY_FALLBACK', [
-        'meta-llama/llama-3.1-8b-instruct',
+        'meta-llama/llama-3.1-8b-instruct:free',
       ]),
       maxRetries: maxRetries
     });
@@ -152,7 +152,7 @@ export class TextGeneratorClient {
       {
         name: 'Google Gemini',
         type: 'gemini',
-        models: ['gemini-pro', 'gemini-1.5-pro'], // Remove incorrect model names
+        models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-pro'],
         priority: 1
       },
       {
@@ -272,7 +272,7 @@ export class TextGeneratorClient {
     throw finalError;
   }
 
-  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName: string = 'gemini-pro'): Promise<string> {
+  private async generateWithGemini(prompt: string, systemPrompt: string, temperature: number = 0.9, modelName: string = 'gemini-2.5-flash'): Promise<string> {
     if (!this.geminiClient) {
       const error = new Error('Google Gemini API key not configured');
       logger.error('Gemini API initialization failed', {
