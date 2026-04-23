@@ -33,7 +33,18 @@ export class WorkflowAdapter {
       params.description,
       params.duration
     );
-    const storyText = variants[0]?.text || params.description;
+    const storyText = variants[0]?.text;
+
+    if (!storyText) {
+      throw new Error(
+        '❌ Не удалось сгенерировать сценарий — все модели недоступны.\n\n' +
+        'Возможные причины:\n' +
+        '• Закончились кредиты OpenRouter\n' +
+        '• Ключ Gemini API заблокирован\n' +
+        '• Превышен лимит запросов\n\n' +
+        'Обратитесь к администратору.'
+      );
+    }
 
     const workflow = new VideoGenerationWorkflow(params.useFreeModels);
     const promptMappings = await workflow.generateVideoPrompts(
@@ -65,7 +76,19 @@ export class WorkflowAdapter {
         params.description,
         params.duration
       );
-      finalStoryText = variants[0]?.text || params.description;
+      const generatedText = variants[0]?.text;
+
+      if (!generatedText) {
+        throw new Error(
+          '❌ Не удалось сгенерировать сценарий — все модели недоступны.\n\n' +
+          'Возможные причины:\n' +
+          '• Закончились кредиты OpenRouter\n' +
+          '• Ключ Gemini API заблокирован\n' +
+          '• Превышен лимит запросов\n\n' +
+          'Обратитесь к администратору.'
+        );
+      }
+      finalStoryText = generatedText;
     }
 
     // Stage 2: Prompt generation (if not provided)
